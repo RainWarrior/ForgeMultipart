@@ -38,11 +38,15 @@ import net.minecraft.world.ChunkCoordIntPair
 import net.minecraft.entity.item.EntityItem
 import net.minecraft.entity.player.EntityPlayer
 import net.minecraft.entity.Entity
+import collection.mutable.{ Map => MMap }
 
-trait TileMultipart extends TileEntity
+case class TileMultipartTrait(val parent: TileMultipart)
+
+class TileMultipart extends TileEntity
 {
-    var partList: ArrayBuffer[TMultiPart] = ArrayBuffer()
-    var partMap: Array[TMultiPart] = new Array(27)
+    val traitMap = MMap[String, TileMultipartTrait]()
+    var partList = ArrayBuffer[TMultiPart]()
+    var partMap = Array.fill[TMultiPart](27)(null)
     
     private var doesTick = false
     
@@ -128,7 +132,7 @@ trait TileMultipart extends TileEntity
             
         val slotMask = part.getSlotMask
         for(i <- 0 until partMap.length)
-            if((slotMask&1<<i) != 0 && partMap(i) != null)
+            if((slotMask&1<< i) != 0 && partMap(i) != null)
                 return false
         
         return occlusionTest(partList, part)
@@ -179,7 +183,7 @@ trait TileMultipart extends TileEntity
         partList+=part
         val mask = part.getSlotMask
         for(i <- 0 until 27)
-            if ((mask&1<<i) > 0)
+            if ((mask&1<< i) > 0)
                 partMap(i) = part
         
         part.bind(this)
@@ -326,7 +330,7 @@ trait TileMultipart extends TileEntity
     }
 }
 
-trait TileMultipartClient extends TileMultipart
+class TileMultipartClient extends TileMultipart
 {
     def renderStatic(pos:Vector3, olm:LazyLightMatrix, pass:Int)
     {

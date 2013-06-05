@@ -6,34 +6,37 @@ import net.minecraftforge.liquids.LiquidStack
 import net.minecraftforge.liquids.ILiquidTank
 import net.minecraftforge.common.ForgeDirection
 
-trait TLiquidTank extends TileMultipart with ITankContainer
+class TLiquidTank(parent: TileMultipart) extends TileMultipartTrait(parent) with ITankContainer with IPartHandler
 {
     var tankList = ListBuffer[ITankContainer]()
     
     override def partAdded(part:TMultiPart)
     {
-        super.partAdded(part)
+        parent.partAdded(part)
         if(part.isInstanceOf[ITankContainer])
             tankList+=part.asInstanceOf[ITankContainer]
     }
     
     override def partRemoved(part:TMultiPart, p:Int)
     {
-        super.partRemoved(part, p)
+        parent.partRemoved(part, p)
         if(part.isInstanceOf[ITankContainer])
             tankList-=part.asInstanceOf[ITankContainer]
     }
     
     override def loadFrom(that:TileMultipart)
     {
-        super.loadFrom(that)
-        if(that.isInstanceOf[TLiquidTank])
-            tankList = that.asInstanceOf[TLiquidTank].tankList
+        parent.loadFrom(that)
+        that.traitMap.get(classOf[ITankContainer].getName) match {
+          case Some(traid) =>
+            tankList = traid.asInstanceOf[TLiquidTank].tankList
+          case None =>
+        }
     }
     
     override def clearParts()
     {
-        super.clearParts()
+        parent.clearParts()
         tankList.clear
     }
     

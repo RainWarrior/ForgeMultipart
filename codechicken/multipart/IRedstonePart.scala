@@ -49,7 +49,7 @@ trait TRedstoneTile extends TileMultipart with IRedstoneConnector
         while(i < 4)
         {
             if(!blocksRedstone(edgeBetween(side, rotateSide(side, i))))
-                m|=1<<i
+                m |= 1 << i
             i+=1
         }
         return m

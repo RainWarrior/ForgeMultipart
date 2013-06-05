@@ -11,14 +11,17 @@ trait JPartialOcclusion
     def allowCompleteOcclusion = false
 }
 
-trait TPartialOcclusionTile extends TileMultipart
+trait IPartialOcclusionTile {
+    def occlusionTest(parts:Seq[TMultiPart], npart:TMultiPart):Boolean
+}
+class TPartialOcclusionTile(parent: TileMultipart) extends TileMultipartTrait(parent) with IPartialOcclusionTile
 {
     override def occlusionTest(parts:Seq[TMultiPart], npart:TMultiPart):Boolean =
     {
         if(npart.isInstanceOf[JPartialOcclusion] && !partialOcclusionTest(parts:+npart))
             return false
         
-        return super.occlusionTest(parts, npart)
+        return parent.occlusionTest(parts, npart)
     }
     
     def partialOcclusionTest(parts:Seq[TMultiPart]):Boolean =

@@ -11,288 +11,192 @@ import cpw.mods.fml.common.FMLCommonHandler
 import cpw.mods.fml.relauncher.Side
 import codechicken.core.packet.PacketCustom
 import net.minecraft.network.packet.Packet53BlockChange
+import net.sf.cglib.proxy.{ Dispatcher, Enhancer, CallbackHelper, ProxyRefDispatcher, NoOp }
+import collection.mutable.{ Map => MMap }
+import java.lang.reflect.Method
+import org.objectweb.asm.Type.getMethodDescriptor
 
-object MultipartGenerator
-{
-    private var ugenid = 0
-    
-    var mirror = scala.reflect.runtime.currentMirror
-    var tb = mirror.mkToolBox()
-    
-    def Apply(f:Tree, args:Tree*) = scala.reflect.runtime.universe.Apply(f, List(args:_*))
-    def Apply(f:Tree, args:List[Tree]) = scala.reflect.runtime.universe.Apply(f, args)
-    def Invoke(s:Tree, n:TermName, args:Tree*) = Apply(Select(s, n), args:_*)
-    def literalUnit = Literal(Constant(()))
-    def PkgIdent(s:String):Tree = Ident(mirror.staticClass(s))
-    
-    def getType(obj:Any) = mirror.classSymbol(obj.getClass).toType
-    
-    def defaultConstructor() = 
-        DefDef(
-            Modifiers(), 
-            nme.CONSTRUCTOR, //method name
-            List(), //type params
-            List(List()), //params
-            TypeTree(), //return type
-            Block(
-                Invoke(//body
-                    Super(This(tpnme.EMPTY), tpnme.EMPTY), 
-                    nme.CONSTRUCTOR
-                )
-            )
-        )
-    
-    def normalClassDef(mods:FlagSet, name:String, parents:List[String], methods:List[Tree]) = 
-        ClassDef(
-            Modifiers(mods),
-            name,
-            List(),
-            Template(
-                parents.map(PkgIdent(_)),
-                emptyValDef,
-                methods
-            )
-        )
-    
-    def uniqueName(prefix:String):String = {
-        val ret = prefix+"$$"+ugenid
-        ugenid += 1
-        return ret
+object MultipartGenerator {
+  private var ugenid = 0
+  
+  var mirror = scala.reflect.runtime.currentMirror
+  var tb = mirror.mkToolBox()
+  
+  def getType(obj:Any) = obj.getClass
+  
+  object SuperSet {
+    class CallbackFilter(base: Class[_], interfaces: Array[Class[_]]) extends CallbackHelper(base, interfaces) {
+      override def getCallback(method: Method): Object = {
+        interfaces.find(_.getMethods.exists { m => 
+          m.getName == method.getName &&
+          getMethodDescriptor(m) == getMethodDescriptor(method)
+        }).map { k =>
+          dispatcherMap.getOrElseUpdate(k.getName, new InterfaceDispatcher(k.getName))
+        }.getOrElse(NoOp.INSTANCE)
+      }
     }
+    case class InterfaceDispatcher(interface: String) extends ProxyRefDispatcher {
+      override def loadObject(proxy: java.lang.Object): Object =
+        proxy.asInstanceOf[TileMultipart].traitMap(interface)
+    }
+    def apply(types:Set[String], client:Boolean) = tb.synchronized {
+      val baseType = if(client) classOf[TileMultipartClient] else classOf[TileMultipart]
+      val sTypes = types.toArray.sorted
+      val typeClasses = sTypes.map(Class.forName(_)).toArray
+      val interfaces = baseType +: typeClasses
+
+      val te = generatorMap.getOrElseUpdate(interfaces, {
+        val s = System.currentTimeMillis
+        println("INTERFACES: " + interfaces)
+        //val delegates = interfaces.map(_.newInstance.asInstanceOf[java.lang.Object]).toArray
+        val enc = new Enhancer()
+        enc.setSuperclass(baseType)
+        enc.setInterfaces(typeClasses)
+        enc.setCallbackFilter(new CallbackFilter(baseType, typeClasses))
+        val callbacks = sTypes.map{ k =>
+          dispatcherMap.getOrElseUpdate(k, new InterfaceDispatcher(k))
+        } :+ NoOp.INSTANCE
+        enc.setCallbacks(callbacks)
+        val dummy = baseType.cast(enc.create()).getClass
+        tileTraitMap += (dummy.getName -> (types + baseType.getClass.getName))
+        MultipartProxy.onTileClassBuilt(dummy)
+        println("Generation ["+interfaces.mkString(", ")+"] took: "+(System.currentTimeMillis-s))
+        enc
+      }).create().asInstanceOf[TileMultipart]
+      for(cls <- sTypes) {
+        te.traitMap(cls) = Class.forName(cls).getConstructor(classOf[TileMultipart]).newInstance(te).asInstanceOf[TileMultipartTrait]
+      }
+      te
+    }
+    private val generatorMap = MMap[Array[Class[_]], Enhancer]()
+    private val dispatcherMap = MMap[String, InterfaceDispatcher]()
     
-    abstract class Generator
+    def uniqueName(prefix: String): String = {
+      val ret = prefix+"$$"+ugenid
+      ugenid += 1
+      return ret
+    }
+  }
+  
+  private val tileTraitMap = MMap[String, Set[String]]()
+  private val interfaceTraitMap_c = MMap[String, String]()
+  private val interfaceTraitMap_s = MMap[String, String]()
+  private val partTraitMap_c = MMap[String, Set[String]]()
+  private val partTraitMap_s = MMap[String, Set[String]]()
+  
+  SuperSet(Set.empty, false)//default impl, boots generator
+  if(FMLCommonHandler.instance.getEffectiveSide == Side.CLIENT)
+    SuperSet(Set.empty, true)
+  
+  private def partTraitMap(client:Boolean) = if(client) partTraitMap_c else partTraitMap_s
+  
+  private def interfaceTraitMap(client:Boolean) = if(client) interfaceTraitMap_c else interfaceTraitMap_s
+    
+  private def traitsForPart(part:TMultiPart, client:Boolean):Set[String] =
+    partTraitMap(client).getOrElseUpdate(part.getClass.getName,
+      interfaceTraitMap(client).filterKeys(Class.forName(_).isInstance(part)).values.toSet)
+  
+  /**
+   * Check if part adds any new interfaces to tile, if so, replace tile with a new copy and call tile.addPart(part)
+   * returns true if tile was replaced
+   */
+  private[multipart] def addPart(world:World, pos:BlockCoord, part:TMultiPart):TileMultipart =
+  {
+    var tile = TileMultipartObj.getOrConvertTile(world, pos)
+    
+    var partTraits = traitsForPart(part, world.isRemote)
+    var ntile = tile
+    if(tile != null)
     {
-        def generate():TileMultipart
+      val converted = !tile.loaded
+      if(converted)//perform client conversion
+      {
+        world.setBlock(pos.x, pos.y, pos.z, MultipartProxy.block.blockID, 0, 1)
+        PacketCustom.sendToChunk(new Packet53BlockChange(pos.x, pos.y, pos.z, world), world, pos.x>>4, pos.z>>4)
+        ntile.writeAddPart(ntile.partList(0))
+      }
+      
+      val tileTraits = tileTraitMap(tile.getClass.getName)
+      partTraits = partTraits.filter(!tileTraits(_))
+      if(!partTraits.isEmpty)
+      {
+        ntile = SuperSet(partTraits++tileTraits, world.isRemote)
+        world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
+        ntile.loadFrom(tile)
+      }
+      else if(converted)
+      {
+        ntile.validate()
+        world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
+      }
+      if(converted)
+        ntile.partList(0).onConverted()
     }
-    
-    object SuperSet
+    else
     {
-        val TileMultipartType = typeOf[TileMultipart]
-        val TileMultipartClientType = typeOf[TileMultipartClient]
-        def apply(types:Seq[Type], client:Boolean) = new SuperSet(types, client)
+      world.setBlock(pos.x, pos.y, pos.z, MultipartProxy.block.blockID)
+      ntile = SuperSet(partTraits, world.isRemote)
+      world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
     }
-    
-    class SuperSet(types:Seq[Type], client:Boolean)
+    ntile.addPart(part)
+    return ntile
+  }
+  
+  /**
+   * Check if tile satisfies all the interfaces required by parts. If not, return a new generated copy of tile
+   */
+  def generateCompositeTile(tile:TileEntity, parts:Seq[TMultiPart], client:Boolean):TileMultipart = 
+  {
+    var partTraits = parts.flatMap(traitsForPart(_, client)).toSet
+    if(tile != null && tile.isInstanceOf[TileMultipart])
     {
-        import SuperSet._
-        val set = baseType+:types.sortWith(_.toString < _.toString)
-        
-        def interfaces = set
-        def baseType = if(client) TileMultipartClientType else TileMultipartType
-        
-        override def equals(obj:Any) = obj match
-        {
-            case x:SuperSet => set == x.set
-            case _ => false
-        }
-        
-        override def hashCode() = set.hashCode
-        
-        def generate():TileMultipart = 
-        {
-            return generatorMap.getOrElse(this, gen_sync).generate
-        }
-        
-        def gen_sync():Generator = tb.synchronized
-        {
-            return generatorMap.getOrElse(this, {
-                var gen = generator
-                generatorMap = generatorMap+(this->gen)
-                gen
-            })
-        }
-        
-        def generator():Generator = 
-        {
-            val s = System.currentTimeMillis
-            val defClass = 
-                normalClassDef(
-                    NoFlags,
-                    uniqueName("TileMultipart_cmp"),
-                    set.map(_.typeSymbol.fullName).toList, 
-                    List(
-                        defaultConstructor
-                    )
-                )
-            val defGenClass = 
-                normalClassDef(
-                    Flag.FINAL, 
-                    uniqueName("TileMultipart_gen"), 
-                    List("codechicken.multipart.MultipartGenerator.Generator"), 
-                    List(//methods
-                        defaultConstructor, 
-                        DefDef(
-                            Modifiers(Flag.OVERRIDE), 
-                            "generate":TermName, 
-                            List(), 
-                            List(List()), 
-                            TypeTree(), 
-                            Invoke(
-                                New(Ident(defClass.name)), 
-                                nme.CONSTRUCTOR
-                            )
-                        )
-                    )
-                )
-            val constructGenClass = 
-                Invoke(//return new generator instance
-                    New(Ident(defGenClass.name)), 
-                    nme.CONSTRUCTOR
-                )
-            
-            val v = tb.eval(Block(defClass, defGenClass, constructGenClass)).asInstanceOf[Generator]
-            val dummy = v.generate
-            tileTraitMap=tileTraitMap+(dummy.getClass->types.toSet)
-            MultipartProxy.onTileClassBuilt(dummy.getClass)
-            println("Generation ["+types.mkString(", ")+"] took: "+(System.currentTimeMillis-s))
-            return v.asInstanceOf[Generator]
-        }
+      var tileTraits = tileTraitMap(tile.getClass.getName)
+      if(partTraits.forall(tileTraits(_)) && partTraits.size == tileTraits.size)//equal contents
+        return tile.asInstanceOf[TileMultipart]
+      
     }
-    
-    private var generatorMap:Map[SuperSet, Generator] = Map()
-    private var tileTraitMap:Map[Class[_], Set[Type]] = Map()
-    private var interfaceTraitMap_c:Map[Type, Seq[Type]] = Map()
-    private var interfaceTraitMap_s:Map[Type, Seq[Type]] = Map()
-    private var partTraitMap_c:Map[Class[_], Seq[Type]] = Map()
-    private var partTraitMap_s:Map[Class[_], Seq[Type]] = Map()
-    
-    SuperSet(Seq(), false).generate//default impl, boots generator
-    if(FMLCommonHandler.instance.getEffectiveSide == Side.CLIENT)
-        SuperSet(Seq(), true).generate
-    
-    private def partTraitMap(client:Boolean) = if(client) partTraitMap_c else partTraitMap_s
-    
-    private def interfaceTraitMap(client:Boolean) = if(client) partTraitMap_c else interfaceTraitMap_s
-        
-    private def traitsForPart(part:TMultiPart, client:Boolean):Seq[Type] = 
+    return SuperSet(partTraits, client)
+  }
+  
+  /**
+   * Check if there are any redundant interfaces on tile, if so, replace tile with new copy
+   */
+  def partRemoved(tile:TileMultipart, part:TMultiPart):TileMultipart = 
+  {
+    val client = tile.worldObj.isRemote
+    var partTraits = tile.partList.flatMap(traitsForPart(_, client))
+    var testSet = partTraits.toSet
+    if(!traitsForPart(part, client).forall(testSet(_)))
     {
-        var ret = partTraitMap(client).getOrElse(part.getClass, null)
-        if(ret == null)
-        {
-            if(client)
-            {
-                ret = getType(part).baseClasses.flatMap(s => interfaceTraitMap_c.getOrElse(s.asClass.toType, List())).distinct
-                partTraitMap_c = partTraitMap_c+(part.getClass -> ret)
-            }
-            else
-            {
-                ret = getType(part).baseClasses.flatMap(s => interfaceTraitMap_s.getOrElse(s.asClass.toType, List())).distinct
-                partTraitMap_s = partTraitMap_s+(part.getClass -> ret)
-            }
-        }
-        return ret
+      val ntile = SuperSet(testSet, client)
+      tile.worldObj.setBlockTileEntity(tile.xCoord, tile.yCoord, tile.zCoord, ntile)
+      ntile.loadFrom(tile)
+      return ntile
     }
-    
-    /**
-     * Check if part adds any new interfaces to tile, if so, replace tile with a new copy and call tile.addPart(part)
-     * returns true if tile was replaced
-     */
-    private[multipart] def addPart(world:World, pos:BlockCoord, part:TMultiPart):TileMultipart =
+    return tile
+  }
+  
+  /**
+   * register s_trait to be applied to tiles containing parts implementing s_interface
+   */
+  def registerTrait(s_interface:String, s_trait:String) { registerTrait(s_interface, s_trait, s_trait) }
+  
+  /**
+   * register traits to be applied to tiles containing parts implementing s_interface
+   * s_trait for server worlds (may be null)
+   * c_trait for client worlds (may be null)
+   */
+  def registerTrait(s_interface:String, c_trait:String, s_trait:String)
+  {
+    if(c_trait != null)
     {
-        var tile = TileMultipartObj.getOrConvertTile(world, pos)
-        
-        var partTraits = traitsForPart(part, world.isRemote)
-        var ntile = tile
-        if(tile != null)
-        {
-            val converted = !tile.loaded
-            if(converted)//perform client conversion
-            {
-                world.setBlock(pos.x, pos.y, pos.z, MultipartProxy.block.blockID, 0, 1)
-                PacketCustom.sendToChunk(new Packet53BlockChange(pos.x, pos.y, pos.z, world), world, pos.x>>4, pos.z>>4)
-                ntile.writeAddPart(ntile.partList(0))
-            }
-            
-            val tileTraits = tileTraitMap(tile.getClass)
-            partTraits = partTraits.filter(!tileTraits(_))
-            if(!partTraits.isEmpty)
-            {
-                ntile = SuperSet(partTraits++tileTraits, world.isRemote).generate
-                world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
-                ntile.loadFrom(tile)
-            }
-            else if(converted)
-            {
-                ntile.validate()
-                world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
-            }
-            if(converted)
-                ntile.partList(0).onConverted()
-        }
-        else
-        {
-            world.setBlock(pos.x, pos.y, pos.z, MultipartProxy.block.blockID)
-            ntile = SuperSet(partTraits, world.isRemote).generate
-            world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
-        }
-        ntile.addPart(part)
-        return ntile
+      //TODO some checking
+      interfaceTraitMap_c(s_interface) = c_trait
     }
-    
-    /**
-     * Check if tile satisfies all the interfaces required by parts. If not, return a new generated copy of tile
-     */
-    def generateCompositeTile(tile:TileEntity, parts:Seq[TMultiPart], client:Boolean):TileMultipart = 
+    if(s_trait != null)
     {
-        var partTraits = parts.flatMap(traitsForPart(_, client)).distinct
-        if(tile != null && tile.isInstanceOf[TileMultipart])
-        {
-            var tileTraits = tileTraitMap(tile.getClass)
-            if(partTraits.forall(tileTraits(_)) && partTraits.size == tileTraits.size)//equal contents
-                return tile.asInstanceOf[TileMultipart]
-            
-        }
-        return SuperSet(partTraits, client).generate
+      //TODO some checking
+      interfaceTraitMap_s(s_interface) = s_trait
     }
-    
-    /**
-     * Check if there are any redundant interfaces on tile, if so, replace tile with new copy
-     */
-    def partRemoved(tile:TileMultipart, part:TMultiPart):TileMultipart = 
-    {
-        val client = tile.worldObj.isRemote
-        var partTraits = tile.partList.flatMap(traitsForPart(_, client))
-        var testSet = partTraits.toSet
-        if(!traitsForPart(part, client).forall(testSet(_)))
-        {
-            val ntile = SuperSet(testSet.toSeq, client).generate
-            tile.worldObj.setBlockTileEntity(tile.xCoord, tile.yCoord, tile.zCoord, ntile)
-            ntile.loadFrom(tile)
-            return ntile
-        }
-        return tile
-    }
-    
-    /**
-     * register s_trait to be applied to tiles containing parts implementing s_interface
-     */
-    def registerTrait(s_interface:String, s_trait:String):Unit = registerTrait(s_interface, s_trait, s_trait)
-    
-    /**
-     * register traits to be applied to tiles containing parts implementing s_interface
-     * s_trait for server worlds (may be null)
-     * c_trait for client worlds (may be null)
-     */
-    def registerTrait(s_interface:String, c_trait:String, s_trait:String)
-    {
-            val iSymbol = mirror.staticClass(s_interface).asClass
-        if(c_trait != null)
-        {
-            val tSymbol = mirror.staticClass(c_trait).asClass
-            //TODO some checking
-            var reg = interfaceTraitMap_c.getOrElse(iSymbol.toType, Seq())
-            if(!reg.contains(tSymbol.toType))
-                reg = reg:+tSymbol.toType
-            interfaceTraitMap_c = interfaceTraitMap_c+(iSymbol.toType->reg)
-        }
-        if(s_trait != null)
-        {
-            val tSymbol = mirror.staticClass(s_trait).asClass
-            //TODO some checking
-            var reg = interfaceTraitMap_s.getOrElse(iSymbol.toType, Seq())
-            if(!reg.contains(tSymbol.toType))
-                reg = reg:+tSymbol.toType
-            interfaceTraitMap_s = interfaceTraitMap_s+(iSymbol.toType->reg)
-        }
-    }
+  }
 }

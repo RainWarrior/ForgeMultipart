@@ -11,12 +11,11 @@ trait IRandomDisplayTick
 /**
  * Saves processor time looping on tiles that don't need it
  */
-trait TRandomDisplayTickTile extends TileMultipartClient
+class TRandomDisplayTickTile(parent: TileMultipart) extends TileMultipartTrait(parent) with IRandomDisplayTick
 {
     override def randomDisplayTick(random:Random)
     {
-        partList.foreach(p =>
-            if(p.isInstanceOf[IRandomDisplayTick])
-                p.asInstanceOf[IRandomDisplayTick].randomDisplayTick(random))
+        parent.partList.filter(_.isInstanceOf[IRandomDisplayTick]).map(
+            _.asInstanceOf[IRandomDisplayTick].randomDisplayTick(random))
     }
 }
