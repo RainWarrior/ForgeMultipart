@@ -122,15 +122,17 @@ object MultipartGenerator {
    * returns true if tile was replaced
    */
   private[multipart] def addPart(world:World, pos:BlockCoord, part:TMultiPart):TileMultipart = {
-    val tile = TileMultipartObj.getOrConvertTile(world, pos)
+    val (tile, loaded) = TileMultipartObj.getOrConvertTile2(world, pos)
     val side = if(tile.worldObj.isRemote) CLIENT else SERVER
     val partIfaces = ifacesForPart(part, side)
     var ntile = tile
     if(tile != null) {
-      val converted = !tile.loaded
-      if(converted) { //perform client conversion
+      if(loaded) { //perform client conversion
         world.setBlock(pos.x, pos.y, pos.z, MultipartProxy.block.blockID, 0, 1)
+        world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
         PacketCustom.sendToChunk(new Packet53BlockChange(pos.x, pos.y, pos.z, world), world, pos.x>>4, pos.z>>4)
+
+        ntile.partList(0).onConverted()
         ntile.writeAddPart(ntile.partList(0))
       }
       
@@ -139,13 +141,7 @@ object MultipartGenerator {
         ntile = SuperSet(partIfaces ++ newIfaces, side)
         world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
         ntile.loadFrom(tile)
-      } else if(converted) {
-        ntile.validate()
-        world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
       }
-      if(converted)
-        ntile.partList(0).onConverted()
-    } else {
       world.setBlock(pos.x, pos.y, pos.z, MultipartProxy.block.blockID)
       ntile = SuperSet(partIfaces, side)
       world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
