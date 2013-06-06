@@ -11,10 +11,13 @@ import cpw.mods.fml.common.FMLCommonHandler
 import cpw.mods.fml.relauncher.Side
 import codechicken.core.packet.PacketCustom
 import net.minecraft.network.packet.Packet53BlockChange
-import net.sf.cglib.proxy.{ Dispatcher, Enhancer, CallbackHelper, ProxyRefDispatcher, NoOp }
+import net.sf.cglib.reflect.FastClass
+import net.sf.cglib.proxy.{ Dispatcher, Enhancer, Callback, CallbackFilter, MethodInterceptor, MethodProxy, NoOp }
 import collection.mutable.{ Map => MMap }
 import java.lang.reflect.Method
 import org.objectweb.asm.Type.getMethodDescriptor
+import Side.{ SERVER, CLIENT }
+import java.util.ArrayList
 
 object MultipartGenerator {
   private var ugenid = 0
@@ -25,51 +28,75 @@ object MultipartGenerator {
   def getType(obj:Any) = obj.getClass
   
   object SuperSet {
-    class CallbackFilter(base: Class[_], interfaces: Array[Class[_]]) extends CallbackHelper(base, interfaces) {
-      override def getCallback(method: Method): Object = {
-        interfaces.find(_.getMethods.exists { m => 
-          m.getName == method.getName &&
-          getMethodDescriptor(m) == getMethodDescriptor(method)
-        }).map { k =>
-          dispatcherMap.getOrElseUpdate(k.getName, new InterfaceDispatcher(k.getName))
-        }.getOrElse(NoOp.INSTANCE)
+    def mEquals(m1: Method, m2: Method) = {
+      m1.getName == m2.getName &&
+      getMethodDescriptor(m1) == getMethodDescriptor(m2)
+    }
+    class Filter(base: Class[_], interfaces: Array[Class[_]], val callbacks: Array[Callback])
+      extends CallbackFilter{
+
+      val methodList = new ArrayList[Method]
+      Enhancer.getMethods(base, interfaces, methodList)
+      val methods = methodList.toArray(Array.empty[Method])
+      val methodMap = Map(methods.map{ m =>
+        interfaces.zipWithIndex.find { i => i._1.getMethods.exists(mEquals(m, _))
+        }.map(i => (m, i._2)).getOrElse((m, callbacks.length - 1))
+      }:_*)
+
+      def accept(method: Method) = {
+        println(s"METHOD: $method")
+        println("INDEX: " + methodMap(method))
+        methodMap(method)
       }
     }
-    case class InterfaceDispatcher(interface: String) extends ProxyRefDispatcher {
-      override def loadObject(proxy: java.lang.Object): Object =
-        proxy.asInstanceOf[TileMultipart].traitMap(interface)
+
+    case class InterfaceDispatcher(interface: String) extends MethodInterceptor {
+      val fc = FastClass.create(Class.forName(interface))
+      override def intercept(parent: Object, method: Method, args: Array[Object], proxy: MethodProxy): Object = {
+        println(s"CALL: $interface, $method")
+        val target = parent.asInstanceOf[TileMultipart].traitMap(interface)
+        fc.getMethod(method).invoke(target, args)
+      }
     }
-    def apply(types:Set[String], client:Boolean) = tb.synchronized {
-      val baseType = if(client) classOf[TileMultipartClient] else classOf[TileMultipart]
-      val sTypes = types.toArray.sorted
-      val typeClasses = sTypes.map(Class.forName(_)).toArray
-      val interfaces = baseType +: typeClasses
+
+    def apply(ifaces: Set[String], side: Side) = MultipartGenerator.synchronized {
+      val baseType = side match {
+        case CLIENT => classOf[TileMultipartClient]
+        case _ => classOf[TileMultipart]
+      }
+      val ifaceNames = ifaces.toArray.sorted
+      val interfaces = ifaceNames.map(Class.forName)
+      val traits = for(i <- ifaceNames) yield {
+        println(s"IFACE: $i")
+        Class.forName(ifaceTraitMap(side.ordinal)(i))
+      }
 
       val te = generatorMap.getOrElseUpdate(interfaces, {
         val s = System.currentTimeMillis
-        println("INTERFACES: " + interfaces)
+        println(s"INTERFACES: ${interfaces.mkString(", ")}")
         //val delegates = interfaces.map(_.newInstance.asInstanceOf[java.lang.Object]).toArray
+        val callbacks = ifaceNames.map(getDispatcher) :+ NoOp.INSTANCE
         val enc = new Enhancer()
         enc.setSuperclass(baseType)
-        enc.setInterfaces(typeClasses)
-        enc.setCallbackFilter(new CallbackFilter(baseType, typeClasses))
-        val callbacks = sTypes.map{ k =>
-          dispatcherMap.getOrElseUpdate(k, new InterfaceDispatcher(k))
-        } :+ NoOp.INSTANCE
+        enc.setInterfaces(interfaces)
+        enc.setCallbackFilter(new Filter(baseType, interfaces, callbacks))
         enc.setCallbacks(callbacks)
         val dummy = baseType.cast(enc.create()).getClass
-        tileTraitMap += (dummy.getName -> (types + baseType.getClass.getName))
+        tileIfaceMap += (dummy.getName -> ifaceNames.toSet)
         MultipartProxy.onTileClassBuilt(dummy)
-        println("Generation ["+interfaces.mkString(", ")+"] took: "+(System.currentTimeMillis-s))
+        println(s"Generation [${ifaceNames.mkString(", ")}] took: ${System.currentTimeMillis - s}ms")
         enc
       }).create().asInstanceOf[TileMultipart]
-      for(cls <- sTypes) {
-        te.traitMap(cls) = Class.forName(cls).getConstructor(classOf[TileMultipart]).newInstance(te).asInstanceOf[TileMultipartTrait]
+      for((iface, trt) <- ifaceNames zip traits) {
+        te.traitMap(iface) = trt.getConstructor(classOf[TileMultipart]).newInstance(te).asInstanceOf[TileMultipartTrait]
       }
       te
     }
     private val generatorMap = MMap[Array[Class[_]], Enhancer]()
     private val dispatcherMap = MMap[String, InterfaceDispatcher]()
+
+    def getDispatcher(iface: String) = 
+      dispatcherMap.getOrElseUpdate(iface, new InterfaceDispatcher(iface))
     
     def uniqueName(prefix: String): String = {
       val ret = prefix+"$$"+ugenid
@@ -78,64 +105,49 @@ object MultipartGenerator {
     }
   }
   
-  private val tileTraitMap = MMap[String, Set[String]]()
-  private val interfaceTraitMap_c = MMap[String, String]()
-  private val interfaceTraitMap_s = MMap[String, String]()
-  private val partTraitMap_c = MMap[String, Set[String]]()
-  private val partTraitMap_s = MMap[String, Set[String]]()
+  private val tileIfaceMap = MMap[String, Set[String]]()
+  private val ifaceTraitMap = Array.fill(2)(MMap[String, String]())
+  private val partIfaceMap = Array.fill(2)(MMap[String, Set[String]]())
   
-  SuperSet(Set.empty, false)//default impl, boots generator
-  if(FMLCommonHandler.instance.getEffectiveSide == Side.CLIENT)
-    SuperSet(Set.empty, true)
+  SuperSet(Set.empty, SERVER)//default impl, boots generator
+  if(FMLCommonHandler.instance.getEffectiveSide == Side.CLIENT) // why?
+    SuperSet(Set.empty, CLIENT)
   
-  private def partTraitMap(client:Boolean) = if(client) partTraitMap_c else partTraitMap_s
-  
-  private def interfaceTraitMap(client:Boolean) = if(client) interfaceTraitMap_c else interfaceTraitMap_s
-    
-  private def traitsForPart(part:TMultiPart, client:Boolean):Set[String] =
-    partTraitMap(client).getOrElseUpdate(part.getClass.getName,
-      interfaceTraitMap(client).filterKeys(Class.forName(_).isInstance(part)).values.toSet)
+  private def ifacesForPart(part: TMultiPart, side: Side): Set[String] =
+    partIfaceMap(side.ordinal).getOrElseUpdate(part.getClass.getName,
+      ifaceTraitMap(side.ordinal).keys.filter(Class.forName(_).isInstance(part)).toSet)
   
   /**
    * Check if part adds any new interfaces to tile, if so, replace tile with a new copy and call tile.addPart(part)
    * returns true if tile was replaced
    */
-  private[multipart] def addPart(world:World, pos:BlockCoord, part:TMultiPart):TileMultipart =
-  {
-    var tile = TileMultipartObj.getOrConvertTile(world, pos)
-    
-    var partTraits = traitsForPart(part, world.isRemote)
+  private[multipart] def addPart(world:World, pos:BlockCoord, part:TMultiPart):TileMultipart = {
+    val tile = TileMultipartObj.getOrConvertTile(world, pos)
+    val side = if(tile.worldObj.isRemote) CLIENT else SERVER
+    val partIfaces = ifacesForPart(part, side)
     var ntile = tile
-    if(tile != null)
-    {
+    if(tile != null) {
       val converted = !tile.loaded
-      if(converted)//perform client conversion
-      {
+      if(converted) { //perform client conversion
         world.setBlock(pos.x, pos.y, pos.z, MultipartProxy.block.blockID, 0, 1)
         PacketCustom.sendToChunk(new Packet53BlockChange(pos.x, pos.y, pos.z, world), world, pos.x>>4, pos.z>>4)
         ntile.writeAddPart(ntile.partList(0))
       }
       
-      val tileTraits = tileTraitMap(tile.getClass.getName)
-      partTraits = partTraits.filter(!tileTraits(_))
-      if(!partTraits.isEmpty)
-      {
-        ntile = SuperSet(partTraits++tileTraits, world.isRemote)
+      val newIfaces = partIfaces &~ tileIfaceMap(tile.getClass.getName)
+      if(!newIfaces.isEmpty) {
+        ntile = SuperSet(partIfaces ++ newIfaces, side)
         world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
         ntile.loadFrom(tile)
-      }
-      else if(converted)
-      {
+      } else if(converted) {
         ntile.validate()
         world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
       }
       if(converted)
         ntile.partList(0).onConverted()
-    }
-    else
-    {
+    } else {
       world.setBlock(pos.x, pos.y, pos.z, MultipartProxy.block.blockID)
-      ntile = SuperSet(partTraits, world.isRemote)
+      ntile = SuperSet(partIfaces, side)
       world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
     }
     ntile.addPart(part)
@@ -145,58 +157,46 @@ object MultipartGenerator {
   /**
    * Check if tile satisfies all the interfaces required by parts. If not, return a new generated copy of tile
    */
-  def generateCompositeTile(tile:TileEntity, parts:Seq[TMultiPart], client:Boolean):TileMultipart = 
-  {
-    var partTraits = parts.flatMap(traitsForPart(_, client)).toSet
-    if(tile != null && tile.isInstanceOf[TileMultipart])
-    {
-      var tileTraits = tileTraitMap(tile.getClass.getName)
-      if(partTraits.forall(tileTraits(_)) && partTraits.size == tileTraits.size)//equal contents
-        return tile.asInstanceOf[TileMultipart]
-      
+  def generateCompositeTile(tile:TileEntity, parts:Seq[TMultiPart], side: Side):TileMultipart = {
+    val partIfaces = parts.flatMap(ifacesForPart(_, side)).toSet
+    if(tile != null && 
+      tileIfaceMap.get(tile.getClass.getName) == Some(partIfaces) &&
+      tile.isInstanceOf[TileMultipart]) {
+      tile.asInstanceOf[TileMultipart]
+    } else {
+      SuperSet(partIfaces, side)
     }
-    return SuperSet(partTraits, client)
   }
   
   /**
    * Check if there are any redundant interfaces on tile, if so, replace tile with new copy
    */
-  def partRemoved(tile:TileMultipart, part:TMultiPart):TileMultipart = 
-  {
-    val client = tile.worldObj.isRemote
-    var partTraits = tile.partList.flatMap(traitsForPart(_, client))
-    var testSet = partTraits.toSet
-    if(!traitsForPart(part, client).forall(testSet(_)))
-    {
-      val ntile = SuperSet(testSet, client)
+  def partRemoved(tile:TileMultipart, part:TMultiPart):TileMultipart = {
+    val side = if(tile.worldObj.isRemote) CLIENT else SERVER
+    val restIfaces = tile.partList.flatMap(ifacesForPart(_, side)).toSet
+    if(!ifacesForPart(part, side).subsetOf(restIfaces)) {
+      val ntile = SuperSet(restIfaces, side)
       tile.worldObj.setBlockTileEntity(tile.xCoord, tile.yCoord, tile.zCoord, ntile)
       ntile.loadFrom(tile)
-      return ntile
+      ntile
     }
-    return tile
+    else tile
   }
-  
+
   /**
-   * register s_trait to be applied to tiles containing parts implementing s_interface
+   * register trt to be applied to tiles containing parts implementing iface
    */
-  def registerTrait(s_interface:String, s_trait:String) { registerTrait(s_interface, s_trait, s_trait) }
-  
+  def registerTrait(iface: String, trt: String) {
+    registerTrait(iface, trt, CLIENT)
+    registerTrait(iface, trt, SERVER)
+  }
   /**
-   * register traits to be applied to tiles containing parts implementing s_interface
-   * s_trait for server worlds (may be null)
-   * c_trait for client worlds (may be null)
+   * register trt to be applied to tiles containing parts implementing iface on a given effective side
+   * trt (may be null) // why?
    */
-  def registerTrait(s_interface:String, c_trait:String, s_trait:String)
-  {
-    if(c_trait != null)
-    {
-      //TODO some checking
-      interfaceTraitMap_c(s_interface) = c_trait
-    }
-    if(s_trait != null)
-    {
-      //TODO some checking
-      interfaceTraitMap_s(s_interface) = s_trait
+  def registerTrait(iface:String, trt:String, side: Side) {
+    if(trt != null) {
+      ifaceTraitMap(side.ordinal)(iface) = trt
     }
   }
 }

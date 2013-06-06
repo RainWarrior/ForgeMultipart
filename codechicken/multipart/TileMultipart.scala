@@ -29,8 +29,8 @@ import net.minecraft.util.MovingObjectPosition
 import scala.collection.mutable.ArrayBuffer
 import codechicken.scala.ScalaBridge._
 import java.util.Random
-import cpw.mods.fml.relauncher.SideOnly
-import cpw.mods.fml.relauncher.Side
+import cpw.mods.fml.relauncher.{ SideOnly, Side}
+import Side.{ SERVER, CLIENT }
 import scala.collection.mutable.Queue
 import codechicken.multipart.handler.MultipartSPH
 import codechicken.core.lighting.LazyLightMatrix
@@ -493,6 +493,7 @@ object TileMultipartObj
     
     def getOrConvertTile(world:World, pos:BlockCoord):TileMultipart =
     {
+        val side = if(world.isRemote) CLIENT else SERVER
         val t = world.getBlockTileEntity(pos.x, pos.y, pos.z)
         if(t.isInstanceOf[TileMultipart])
             return t.asInstanceOf[TileMultipart]
@@ -501,7 +502,7 @@ object TileMultipartObj
         val p = MultiPartRegistry.convertBlock(world, pos, id)
         if(p != null)
         {
-            val t = MultipartGenerator.generateCompositeTile(null, Seq(p), world.isRemote)
+            val t = MultipartGenerator.generateCompositeTile(null, Seq(p), side)
             t.xCoord = pos.x
             t.yCoord = pos.y
             t.zCoord = pos.z
@@ -559,7 +560,7 @@ object TileMultipartObj
             return
         
         val t = world.getBlockTileEntity(pos.x, pos.y, pos.z)
-        val tilemp = MultipartGenerator.generateCompositeTile(t, parts, true)
+        val tilemp = MultipartGenerator.generateCompositeTile(t, parts, CLIENT)
         if(tilemp != t)
             world.setBlockTileEntity(pos.x, pos.y, pos.z, tilemp)
         
@@ -610,7 +611,7 @@ object TileMultipartObj
         if(parts.size == 0)
             return null
         
-        val tmb = MultipartGenerator.generateCompositeTile(null, parts, false)
+        val tmb = MultipartGenerator.generateCompositeTile(null, parts, SERVER)
         tmb.readFromNBT(tag)
         tmb.loadParts(parts)
         return tmb

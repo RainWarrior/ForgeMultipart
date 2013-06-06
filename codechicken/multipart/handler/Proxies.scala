@@ -47,7 +47,7 @@ class MultipartProxy_serverImpl
         MultipartGenerator.registerTrait(
           "codechicken.multipart.IRandomDisplayTick",
           "codechicken.multipart.TRandomDisplayTickTile",
-          null)
+          Side.CLIENT)
         MultipartGenerator.registerTrait(
           "codechicken.multipart.IPartHandler",
           "codechicken.multipart.PartHandler")
