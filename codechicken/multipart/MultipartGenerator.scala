@@ -123,7 +123,7 @@ object MultipartGenerator {
    */
   private[multipart] def addPart(world:World, pos:BlockCoord, part:TMultiPart):TileMultipart = {
     val (tile, loaded) = TileMultipartObj.getOrConvertTile2(world, pos)
-    val side = if(tile.worldObj.isRemote) CLIENT else SERVER
+    val side = if(world.isRemote) CLIENT else SERVER
     val partIfaces = ifacesForPart(part, side)
     var ntile = tile
     if(tile != null) {
@@ -142,6 +142,7 @@ object MultipartGenerator {
         world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
         ntile.loadFrom(tile)
       }
+    } else {
       world.setBlock(pos.x, pos.y, pos.z, MultipartProxy.block.blockID)
       ntile = SuperSet(partIfaces, side)
       world.setBlockTileEntity(pos.x, pos.y, pos.z, ntile)
