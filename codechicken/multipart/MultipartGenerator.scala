@@ -44,8 +44,8 @@ object MultipartGenerator {
       }:_*)
 
       def accept(method: Method) = {
-        println(s"METHOD: $method")
-        println("INDEX: " + methodMap(method))
+        //println(s"METHOD: $method")
+        //println("INDEX: " + methodMap(method))
         methodMap(method)
       }
     }
@@ -59,15 +59,16 @@ object MultipartGenerator {
       }
     }
 
-    def apply(ifaces: Set[String], side: Side) = MultipartGenerator.synchronized {
+    def apply(pIfaces: Set[String], side: Side) = MultipartGenerator.synchronized {
       val baseType = side match {
         case CLIENT => classOf[TileMultipartClient]
         case _ => classOf[TileMultipart]
       }
-      val ifaceNames = ifaces.toArray.sorted
+      val partIfaces = pIfaces.toArray.sorted
+      val ifaceNames = partIfaces.map(ifaceIfaceMap(side.ordinal))
       val interfaces = ifaceNames.map(Class.forName)
-      val traits = for(i <- ifaceNames) yield {
-        println(s"IFACE: $i")
+      val traits = for(i <- partIfaces) yield {
+        println(s"PART IFACE: $i")
         Class.forName(ifaceTraitMap(side.ordinal)(i))
       }
 
@@ -105,9 +106,10 @@ object MultipartGenerator {
     }
   }
   
-  private val tileIfaceMap = MMap[String, Set[String]]()
-  private val ifaceTraitMap = Array.fill(2)(MMap[String, String]())
-  private val partIfaceMap = Array.fill(2)(MMap[String, Set[String]]())
+  private val tileIfaceMap = MMap[String, Set[String]]() // tile class -> part ifaces (cache)
+  private val ifaceIfaceMap = Array.fill(2)(MMap[String, String]()) // part interface -> trait interface
+  private val ifaceTraitMap = Array.fill(2)(MMap[String, String]()) // part interface -> trait class
+  private val partIfaceMap = Array.fill(2)(MMap[String, Set[String]]()) // part class -> part ifaces (cache)
   
   SuperSet(Set.empty, SERVER)//default impl, boots generator
   if(FMLCommonHandler.instance.getEffectiveSide == Side.CLIENT) // why?
@@ -181,19 +183,21 @@ object MultipartGenerator {
   }
 
   /**
-   * register trt to be applied to tiles containing parts implementing iface
+   * register trt to be applied to tiles containing parts implementing pIface (and intercepting tIface methods)
    */
-  def registerTrait(iface: String, trt: String) {
-    registerTrait(iface, trt, CLIENT)
-    registerTrait(iface, trt, SERVER)
+  def registerTrait(pIface: String, tIface: String, trt: String) {
+    registerTrait(pIface, tIface, trt, CLIENT)
+    registerTrait(pIface, tIface, trt, SERVER)
   }
   /**
-   * register trt to be applied to tiles containing parts implementing iface on a given effective side
+   * register trt to be applied to tiles containing parts implementing pIface 
+   * (and intercepting tIface methods) on a given effective side
    * trt (may be null) // why?
    */
-  def registerTrait(iface:String, trt:String, side: Side) {
+  def registerTrait(pIface:String, tIface: String, trt:String, side: Side) {
     if(trt != null) {
-      ifaceTraitMap(side.ordinal)(iface) = trt
+      ifaceIfaceMap(side.ordinal)(pIface) = tIface
+      ifaceTraitMap(side.ordinal)(pIface) = trt
     }
   }
 }

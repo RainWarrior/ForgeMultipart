@@ -22,9 +22,14 @@ trait IFaceRedstonePart extends IRedstonePart
     def getFace():Int
 }
 
-trait TRedstoneTile extends TileMultipart with IRedstoneConnector
+trait IRedstoneTile extends IRedstoneConnector with IRedstonePart {
+  def openConnections(side: Int): Int
+}
+
+class TRedstoneTile(parent: TileMultipart) extends TileMultipartTrait(parent) with IRedstoneTile
 {
     import RedstoneInteractions._
+    import parent._
     
     override def strongPowerLevel(side:Int):Int =
     {
@@ -39,7 +44,7 @@ trait TRedstoneTile extends TileMultipart with IRedstoneConnector
         return max
     }
     
-    def openConnections(side:Int):Int =
+    override def openConnections(side:Int):Int =
     {
         if(blocksRedstone(side))
             return 0
@@ -117,7 +122,7 @@ object RedstoneInteractions
     {
         val tile = p.tile
         return getWeakPowerTo(tile.worldObj, tile.xCoord, tile.yCoord, tile.zCoord, side, 
-                tile.asInstanceOf[TRedstoneTile].openConnections(side)&connectionMask(p, side))
+                tile.asInstanceOf[IRedstoneTile].openConnections(side)&connectionMask(p, side))
     }
     
     def getWeakPowerTo(world:World, x:Int, y:Int, z:Int, side:Int, mask:Int):Int =
