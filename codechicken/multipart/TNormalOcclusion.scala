@@ -15,8 +15,8 @@ object NormalOcclusionTest
         if(part2.isInstanceOf[JNormalOcclusion])
             boxes = boxes++part2.asInstanceOf[JNormalOcclusion].getOcclusionBoxes
         
-        if(part2.isInstanceOf[JPartialOcclusion])
-            boxes = boxes++part2.asInstanceOf[JPartialOcclusion].getPartialOcclusionBoxes
+        if(part2.isInstanceOf[IPartialOcclusion])
+            boxes = boxes++part2.asInstanceOf[IPartialOcclusion].getPartialOcclusionBoxes
 
         return NormalOcclusionTest(boxes, part1.getOcclusionBoxes) 
     }

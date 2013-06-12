@@ -4,7 +4,7 @@ import codechicken.core.vec.Cuboid6
 import codechicken.scala.JSeq
 import codechicken.scala.ScalaBridge._
 
-trait JPartialOcclusion
+trait IPartialOcclusion
 {
     def getPartialOcclusionBoxes():JSeq[Cuboid6]
     
@@ -18,7 +18,7 @@ class TPartialOcclusionTile(parent: TileMultipart) extends TileMultipartTrait(pa
 {
     override def occlusionTest(parts:Seq[TMultiPart], npart:TMultiPart):Boolean =
     {
-        if(npart.isInstanceOf[JPartialOcclusion] && !partialOcclusionTest(parts:+npart))
+        if(npart.isInstanceOf[IPartialOcclusion] && !partialOcclusionTest(parts:+npart))
             return false
         
         return parent.occlusionTest(parts, npart)
@@ -30,8 +30,8 @@ class TPartialOcclusionTile(parent: TileMultipart) extends TileMultipartTrait(pa
         for(i <- 0 until parts.length)
         {
             val part = parts(i)
-            if(part.isInstanceOf[JPartialOcclusion])
-                test.fill(i, part.asInstanceOf[JPartialOcclusion])
+            if(part.isInstanceOf[IPartialOcclusion])
+                test.fill(i, part.asInstanceOf[IPartialOcclusion])
         }
         return test()
     }
@@ -43,7 +43,7 @@ class PartialOcclusionTest(size:Int)
     val bits = new Array[Byte](res*res*res)
     val partial = new Array[Boolean](size)
     
-    def fill(i:Int, part:JPartialOcclusion)
+    def fill(i:Int, part:IPartialOcclusion)
     {
         fill(i, part.getPartialOcclusionBoxes, part.allowCompleteOcclusion)
     }

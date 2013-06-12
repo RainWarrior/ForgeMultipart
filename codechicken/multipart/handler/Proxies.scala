@@ -40,7 +40,7 @@ class MultipartProxy_serverImpl
           "net.minecraftforge.liquids.ITankContainer",
           "codechicken.multipart.TLiquidTank")*/
         MultipartGenerator.registerTrait(
-          "codechicken.multipart.JPartialOcclusion",
+          "codechicken.multipart.IPartialOcclusion",
           "codechicken.multipart.IPartialOcclusionTile",
           "codechicken.multipart.TPartialOcclusionTile")
         MultipartGenerator.registerTrait(

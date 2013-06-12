@@ -55,7 +55,7 @@ class TRedstoneTile(parent: TileMultipart) extends TileMultipartTrait(parent) wi
         while(i < 4)
         {
             if(!blocksRedstone(edgeBetween(side, rotateSide(side&6, i))))
-                m|=1<<i
+                m |= 1 << i
             i+=1
         }
         return m

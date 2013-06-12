@@ -17,7 +17,7 @@ import net.minecraft.block.Block
 import codechicken.multipart.TCuboidPart
 import net.minecraft.util.MovingObjectPosition
 import net.minecraft.entity.player.EntityPlayer
-import codechicken.multipart.JPartialOcclusion
+import codechicken.multipart.IPartialOcclusion
 import codechicken.core.vec.Rotation
 import codechicken.multipart.TileMultipart
 import codechicken.core.render.Vertex5
@@ -193,7 +193,7 @@ trait CommonMicroblockClient extends CommonMicroblock with MicroblockClient with
     }
 }
 
-abstract class CommonMicroblock(shape$:Byte = 0, material$:Int = 0) extends Microblock(shape$, material$) with JPartialOcclusion with TMicroOcclusion
+abstract class CommonMicroblock(shape$:Byte = 0, material$:Int = 0) extends Microblock(shape$, material$) with IPartialOcclusion with TMicroOcclusion
 {
     def microClass():MicroblockClass
     

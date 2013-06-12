@@ -9,7 +9,7 @@ import codechicken.core.vec.AxisCycle
 import codechicken.core.vec.Rotation
 import codechicken.multipart.TMultiPart
 import codechicken.multipart.TNormalOcclusion
-import codechicken.multipart.JPartialOcclusion
+import codechicken.multipart.IPartialOcclusion
 import codechicken.multipart.NormalOcclusionTest
 import codechicken.multipart.TileMultipart
 import codechicken.multipart.MultiPartRegistry
@@ -238,7 +238,7 @@ class PostMicroblockClient(shape$:Byte = 0, material$:Int = 0) extends PostMicro
     }
 }
 
-class PostMicroblock(shape$:Byte = 0, material$:Int = 0) extends Microblock(shape$, material$) with JPartialOcclusion with TNormalOcclusion
+class PostMicroblock(shape$:Byte = 0, material$:Int = 0) extends Microblock(shape$, material$) with IPartialOcclusion with TNormalOcclusion
 {
     def this(size:Int, orient:Int, material:Int) = this((size<<4|orient).toByte, material)
     

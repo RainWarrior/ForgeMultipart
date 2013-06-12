@@ -1,44 +1,30 @@
 package codechicken.multipart
 
-import net.minecraft.tileentity.TileEntity
-import scala.collection.mutable.ListBuffer
-import net.minecraft.network.packet.Packet
-import codechicken.core.packet.PacketCustom
-import codechicken.multipart.handler.MultipartCPH
-import codechicken.core.vec.BlockCoord
-import net.minecraft.world.World
-import java.util.List
-import scala.collection.JavaConverters._
-import net.minecraft.nbt.NBTTagCompound
-import java.io.ByteArrayOutputStream
-import java.io.DataOutputStream
-import java.io.DataInputStream
-import codechicken.core.data.MCDataInputStream
-import codechicken.core.data.MCDataOutput
-import codechicken.core.data.MCDataOutputStream
-import net.minecraft.client.multiplayer.NetClientHandler
-import codechicken.core.vec.Cuboid6
-import scala.collection.mutable.HashSet
-import codechicken.multipart.handler.MultipartProxy
 import net.minecraft.block.Block
-import net.minecraft.item.ItemStack
-import codechicken.core.vec.Vector3
-import net.minecraft.nbt.NBTTagList
+import net.minecraft.client.multiplayer.NetClientHandler
 import net.minecraft.client.particle.EffectRenderer
-import net.minecraft.util.MovingObjectPosition
-import scala.collection.mutable.ArrayBuffer
-import codechicken.scala.ScalaBridge._
-import java.util.Random
-import cpw.mods.fml.relauncher.{ SideOnly, Side}
-import Side.{ SERVER, CLIENT }
-import scala.collection.mutable.Queue
-import codechicken.multipart.handler.MultipartSPH
-import codechicken.core.lighting.LazyLightMatrix
-import net.minecraft.world.ChunkCoordIntPair
 import net.minecraft.entity.item.EntityItem
 import net.minecraft.entity.player.EntityPlayer
 import net.minecraft.entity.Entity
-import collection.mutable.{ Map => MMap }
+import net.minecraft.item.ItemStack
+import net.minecraft.nbt.{ NBTTagCompound, NBTTagList }
+import net.minecraft.network.packet.Packet
+import net.minecraft.tileentity.TileEntity
+import net.minecraft.util.MovingObjectPosition
+import net.minecraft.world.ChunkCoordIntPair
+import net.minecraft.world.World
+import codechicken.core.data.{ MCDataInputStream, MCDataOutput, MCDataOutputStream }
+import codechicken.core.lighting.LazyLightMatrix
+import codechicken.core.packet.PacketCustom
+import codechicken.core.vec.{ BlockCoord, Cuboid6, Vector3 }
+import codechicken.multipart.handler.{ MultipartCPH, MultipartProxy, MultipartSPH }
+import codechicken.scala.ScalaBridge._
+import java.io.{ ByteArrayOutputStream, DataOutputStream, DataInputStream }
+import java.util.{ List => JList, Random }
+import collection.JavaConverters._
+import collection.mutable.{ ArrayBuffer, HashSet, ListBuffer, Map => MMap, Queue }
+import cpw.mods.fml.relauncher.{ SideOnly, Side}
+import Side.{ SERVER, CLIENT }
 
 case class TileMultipartTrait(val parent: TileMultipart)
 
@@ -56,10 +42,10 @@ class TileMultipart extends TileEntity
         partMap = that.partMap
         doesTick = that.doesTick
         
-        partList.foreach(_.bind(this))
+        for(p <- partList) p.bind(this)
     }
     
-    def jPartList():List[TMultiPart] = partList.asJava
+    def jPartList():JList[TMultiPart] = partList.asJava
     
     override def canUpdate() = doesTick//TODO: part merging true
     
@@ -67,41 +53,35 @@ class TileMultipart extends TileEntity
     {
         super.updateEntity()
         
-        TileMultipartObj.startOperation(this)
-        partList.foreach(_.update())
-        TileMultipartObj.finishOperation(this)
+        TileMultipart.startOperation(this)
+        for(p <- partList) p.update()
+        TileMultipart.finishOperation(this)
     }
     
-    override def onChunkUnload()
-    {
-        partList.foreach(_.onChunkUnload())
-    }
-    
-    def onChunkLoad()
-    {
-        partList.foreach(_.onChunkLoad())
-    }
+    override def onChunkUnload() = for(p <- partList) p.onChunkUnload()
+
+    def onChunkLoad() = for(p <- partList) p.onChunkLoad()
     
     override def validate()
     {
         val wasInvalid = isInvalid()
         super.validate()
         if(wasInvalid)
-            partList.foreach(_.onWorldJoin())
+            for(p <- partList) p.onWorldJoin()
     }
     
     override def invalidate()
     {
         super.invalidate()
         if(worldObj != null)
-            partList.foreach(_.onWorldSeparate())
+            for(p <- partList) p.onWorldSeparate()
     }
     
     def notifyPartChange()
     {
-        TileMultipartObj.startOperation(this)
-        partList.foreach(_.onPartChanged())
-        TileMultipartObj.finishOperation(this)
+        TileMultipart.startOperation(this)
+        for(p <- partList) p.onPartChanged()
+        TileMultipart.finishOperation(this)
         
         worldObj.notifyBlocksOfNeighborChange(xCoord, yCoord, zCoord, getBlockType().blockID)
         worldObj.updateAllLightTypes(xCoord, yCoord, zCoord)
@@ -109,17 +89,14 @@ class TileMultipart extends TileEntity
     
     def onNeighborBlockChange(world:World, x:Int, y:Int, z:Int, id:Int)
     {
-        TileMultipartObj.startOperation(this)
-        partList.foreach(_.onNeighbourChanged())
-        TileMultipartObj.finishOperation(this)
+        TileMultipart.startOperation(this)
+        for(p <- partList) p.onNeighbourChanged()
+        TileMultipart.finishOperation(this)
     }
     
     def getLightValue() = partList.foldLeft(0)((l, p) => Math.max(l, p.getLightValue))
     
-    def markDirty()
-    {
-        worldObj.updateTileEntityChunkAndDoNothing(xCoord, yCoord, zCoord, this)
-    }
+    def markDirty() = worldObj.updateTileEntityChunkAndDoNothing(xCoord, yCoord, zCoord, this)
     
     def isSolid(side:Int):Boolean = 
     {
@@ -215,7 +192,7 @@ class TileMultipart extends TileEntity
     
     def remPart(part:TMultiPart):TileMultipart =
     {
-        if(TileMultipartObj.queueRemoval(this, part))
+        if(TileMultipart.queueRemoval(this, part))
             return null
         
         val i = remPart_do(part)
@@ -306,7 +283,7 @@ class TileMultipart extends TileEntity
     def dropItems(items:Seq[ItemStack])
     {
         val pos = Vector3.fromTileEntityCenter(this)
-        items.foreach(item => TileMultipartObj.dropItem(item, worldObj, pos))
+        items.foreach(item => TileMultipart.dropItem(item, worldObj, pos))
     }
     
     def markRender()
@@ -329,9 +306,9 @@ class TileMultipart extends TileEntity
     
     def onEntityCollision(entity:Entity)
     {
-        TileMultipartObj.startOperation(this)
-        partList.foreach(_.onEntityCollision(entity))
-        TileMultipartObj.finishOperation(this)
+        TileMultipart.startOperation(this)
+        for(p <- partList) p.onEntityCollision(entity)
+        TileMultipart.finishOperation(this)
     }
     
     def strongPowerLevel(side:Int) = 0
@@ -351,18 +328,18 @@ class TileMultipartClient extends TileMultipart
 {
     def renderStatic(pos:Vector3, olm:LazyLightMatrix, pass:Int)
     {
-        partList.foreach(part => part.renderStatic(pos, olm, pass))
+        for(p <- partList) p.renderStatic(pos, olm, pass)
     }
     
     def renderDynamic(pos:Vector3, frame:Float)
     {
-        partList.foreach(part => part.renderDynamic(pos, frame))
+        for(p <- partList) p.renderDynamic(pos, frame)
     }
     
     def randomDisplayTick(random:Random){}
 }
 
-object TileMultipartObj
+object TileMultipart
 {
     var renderID:Int = -1
     

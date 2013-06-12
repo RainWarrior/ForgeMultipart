@@ -124,7 +124,7 @@ object MultipartGenerator {
    * returns true if tile was replaced
    */
   private[multipart] def addPart(world:World, pos:BlockCoord, part:TMultiPart):TileMultipart = {
-    val (tile, loaded) = TileMultipartObj.getOrConvertTile2(world, pos)
+    val (tile, loaded) = TileMultipart.getOrConvertTile2(world, pos)
     val side = if(world.isRemote) CLIENT else SERVER
     val partIfaces = ifacesForPart(part, side)
     var ntile = tile
