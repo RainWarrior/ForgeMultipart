@@ -24,6 +24,9 @@ trait IFaceRedstonePart extends IRedstonePart
 }
 
 trait IRedstoneTile extends IRedstoneConnector {
+  def strongPowerLevel(side:Int):Int
+  def weakPowerLevel(side:Int):Int
+  def canConnectRedstone(side:Int):Boolean
   def openConnections(side: Int): Int
 }
 
@@ -32,7 +35,7 @@ class TRedstoneTile(parent: TileMultipart) extends TileMultipartTrait(parent) wi
     import RedstoneInteractions._
     import parent._
     
-    def strongPowerLevel(side:Int):Int =
+    override def strongPowerLevel(side:Int):Int =
     {
         var max = 0
         partList.foreach(p => 
@@ -63,16 +66,16 @@ class TRedstoneTile(parent: TileMultipart) extends TileMultipartTrait(parent) wi
     
     def blocksRedstone(i:Int) = partMap(i) != null && partMap(i).blocksRedstone
     
-    def weakPowerLevel(side:Int):Int = 
+    override def weakPowerLevel(side:Int):Int = 
         weakPowerLevel(side, otherConnectionMask(worldObj, xCoord, yCoord, zCoord, side, true))
     
-    def canConnectRedstone(side:Int):Boolean =
+    override def canConnectRedstone(side:Int):Boolean =
     {
         val vside = vanillaToSide(side)
         return (getConnectionMask(vside) & otherConnectionMask(worldObj, xCoord, yCoord, zCoord, vside, false)) > 0
     }
     
-    def getConnectionMask(side:Int):Int = 
+    override def getConnectionMask(side:Int):Int = 
     {
         val mask = openConnections(side)
         var res = 0
@@ -81,7 +84,7 @@ class TRedstoneTile(parent: TileMultipart) extends TileMultipartTrait(parent) wi
         return res
     }
     
-    def weakPowerLevel(side:Int, mask:Int):Int = 
+    override def weakPowerLevel(side:Int, mask:Int):Int = 
     {
         val tmask = openConnections(side)&mask
         var max = 0
