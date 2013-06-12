@@ -12,31 +12,25 @@ class TLiquidTank(parent: TileMultipart) extends TileMultipartTrait(parent) with
     
     override def partAdded(part:TMultiPart)
     {
-        parent.partAdded(part)
         if(part.isInstanceOf[ITankContainer])
             tankList+=part.asInstanceOf[ITankContainer]
     }
     
     override def partRemoved(part:TMultiPart, p:Int)
     {
-        parent.partRemoved(part, p)
         if(part.isInstanceOf[ITankContainer])
             tankList-=part.asInstanceOf[ITankContainer]
     }
     
     override def loadFrom(that:TileMultipart)
     {
-        parent.loadFrom(that)
-        that.traitMap.get(classOf[ITankContainer].getName) match {
-          case Some(traid) =>
+        for(traid <- that.traitMap.get(classOf[ITankContainer].getName)) {
             tankList = traid.asInstanceOf[TLiquidTank].tankList
-          case None =>
         }
     }
     
     override def clearParts()
     {
-        parent.clearParts()
         tankList.clear
     }
     

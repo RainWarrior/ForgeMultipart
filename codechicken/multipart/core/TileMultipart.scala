@@ -28,6 +28,13 @@ import Side.{ SERVER, CLIENT }
 
 case class TileMultipartTrait(val parent: TileMultipart)
 
+trait IPartHandler {
+  def partAdded(part:TMultiPart)
+  def partRemoved(part:TMultiPart, p:Int)
+  def loadFrom(that:TileMultipart)
+  def clearParts()
+}
+
 class TileMultipart extends TileEntity
 {
     val traitMap = MMap[String, TileMultipartTrait]()
@@ -43,6 +50,7 @@ class TileMultipart extends TileEntity
         doesTick = that.doesTick
         
         for(p <- partList) p.bind(this)
+        for(t@(_t: IPartHandler) <- traitMap.valuesIterator) t.loadFrom(that)
     }
     
     def jPartList():JList[TMultiPart] = partList.asJava
@@ -188,7 +196,10 @@ class TileMultipart extends TileEntity
         partAdded(part)
     }
     
-    def partAdded(part:TMultiPart){}
+    def partAdded(part:TMultiPart)
+    {
+        for(t@(_t: IPartHandler) <- traitMap.valuesIterator) t.partAdded(part)
+    }
     
     def remPart(part:TMultiPart):TileMultipart =
     {
@@ -243,7 +254,10 @@ class TileMultipart extends TileEntity
         return r
     }
     
-    def partRemoved(part:TMultiPart, p:Int){}
+    def partRemoved(part:TMultiPart, p:Int)
+    {
+        for(t@(_t: IPartHandler) <- traitMap.valuesIterator) t.partRemoved(part, p)
+    }
 
     private[multipart] def loadParts(parts:ListBuffer[TMultiPart])
     {
@@ -258,6 +272,7 @@ class TileMultipart extends TileEntity
     def clearParts()
     {
         partList.clear()
+        for(t@(_t: IPartHandler) <- traitMap.valuesIterator) t.clearParts()
     }
     
     def writeDesc(packet:PacketCustom)

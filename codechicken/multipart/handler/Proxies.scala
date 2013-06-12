@@ -35,10 +35,10 @@ class MultipartProxy_serverImpl
         config = new ConfigFile(new File(cfgdir, "multipart.cfg"))
             .setComment("Multipart API config file")
         
-        /*MultipartGenerator.registerTrait(
+        MultipartGenerator.registerTrait(
           "net.minecraftforge.liquids.ITankContainer",
           "net.minecraftforge.liquids.ITankContainer",
-          "codechicken.multipart.TLiquidTank")*/
+          "codechicken.multipart.TLiquidTank")
         MultipartGenerator.registerTrait(
           "codechicken.multipart.IPartialOcclusion",
           "codechicken.multipart.IPartialOcclusionTile",
@@ -52,9 +52,6 @@ class MultipartProxy_serverImpl
           "codechicken.multipart.IRandomDisplayTick",
           "codechicken.multipart.TRandomDisplayTickTile",
           Side.CLIENT)
-        /*MultipartGenerator.registerTrait(
-          "codechicken.multipart.IPartHandler",
-          "codechicken.multipart.PartHandler")*/
     }
     
     def postInit()
